@@ -30,6 +30,10 @@ int main(int argc, char **argv) {
 
     /* Pipes is first arg */
     sscanf(argv[1], "%d", &num_pipes);
+    if (num_pipes > MAX_PIPES) {
+        printf("Pipes: %d, exceeds MAX_PIPES: %d\n", num_pipes, MAX_PIPES);
+        exit(1);
+    }
     printf("Pipes: %d\n", num_pipes);
     for (int i = 0; i < num_pipes; i++) {
         if (pipe2(&pipes[i * 2], O_NONBLOCK | O_CLOEXEC)) {
@@ -40,7 +44,8 @@ int main(int argc, char **argv) {
 
     /* Create an io_uring */
     struct io_uring ring;
-    if (io_uring_queue_init(5000, &ring, IORING_SETUP_SQPOLL | IORING_SETUP_SQ_AFF)) {
+    // Since we have two events per rotation, an io_ring twice the size of the number of pipes makes sense
+    if (io_uring_queue_init(num_pipes * 2, &ring, IORING_SETUP_SQPOLL | IORING_SETUP_SQ_AFF)) {
         printf("Cannot create an io_uring!\n");
         return 0;
     }
@@ -117,10 +122,10 @@ int main(int argc, char **argv) {
                     printf("Mismatching read/write: %d\n", cqes[j]->res);
                     return 0;
                 }
-
-                /* Mark this completion as seen */
-                io_uring_cqe_seen(&ring, cqes[j]);
             }
+            
+            /* Does the same as io_uring_cqe_seen (that literally does io_uring_cq_advance(&ring, 1)), except all at once */
+            io_uring_cq_advance(&ring, completions);
 
             /* Update */
             remaining_completions -= completions;
